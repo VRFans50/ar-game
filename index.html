@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Gravity Sort - Full Pro</title>
+    <title>Gravity Sort - Final Stable</title>
     <script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
     <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
     <style>
@@ -33,7 +33,6 @@
         }
         .btn-play { background: #4facfe; color: white; }
         .btn-settings { background: rgba(255, 255, 255, 0.1); color: white; }
-        .btn-ar { background: #ff4f8b !important; color: white; }
 
         #game-ui {
             position: absolute; top: 20px; left: 20px; color: white;
@@ -56,13 +55,16 @@
 
         #game-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; }
         canvas { display: block; position: absolute; top: 0; left: 0; z-index: 20; }
-        #ar-holder { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; display: none; }
+        
+        /* Исправление для видео AR */
+        .a-canvas { display: none !important; }
+        video { position: fixed !important; top: 0 !important; left: 0 !important; width: 100% !important; height: 100% !important; object-fit: cover !important; z-index: -1 !important; }
+
         .hidden { display: none !important; }
+        .arjs-loader { display: none !important; }
     </style>
 </head>
-<body>
-
-    <div id="ar-holder"></div>
+<body style="margin: 0; overflow: hidden;">
 
     <div id="ui-layer">
         <div id="main-menu" class="menu-container">
@@ -78,7 +80,7 @@
                 <button class="map-btn active" onclick="setMap('classic', this)">Классика</button>
                 <button class="map-btn" onclick="setMap('midnight', this)">Полночь</button>
                 <button class="map-btn" onclick="setMap('coal', this)">Уголь</button>
-                <button class="map-btn btn-ar" onclick="startAR(this)">AR РЕЖИМ 📷</button>
+                <button class="map-btn" style="background:#ff4f8b" onclick="enableAR(this)">AR РЕЖИМ 📷</button>
             </div>
             <button class="btn btn-settings" id="back-from-settings">Назад</button>
         </div>
@@ -101,7 +103,6 @@
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 const uiLayer = document.getElementById('ui-layer');
-const arHolder = document.getElementById('ar-holder');
 const scoreElement = document.getElementById('current-score');
 const bestScoreElement = document.getElementById('best-score');
 
@@ -121,10 +122,16 @@ function resize() {
 window.addEventListener('resize', resize);
 resize();
 
-async function startAR(btn) {
-    arHolder.style.display = 'block';
-    if (!arHolder.innerHTML) {
-        arHolder.innerHTML = `<a-scene embedded arjs="sourceType: webcam; debugUIEnabled: false;" vr-mode-ui="enabled: false"><a-entity camera></a-entity></a-scene>`;
+function enableAR(btn) {
+    if (!document.querySelector('a-scene')) {
+        const scene = document.createElement('a-scene');
+        scene.setAttribute('embedded', '');
+        scene.setAttribute('arjs', 'sourceType: webcam; debugUIEnabled: false;');
+        scene.setAttribute('vr-mode-ui', 'enabled: false');
+        const cam = document.createElement('a-entity');
+        cam.setAttribute('camera', '');
+        scene.appendChild(cam);
+        document.body.prepend(scene);
     }
     setMap('ar', btn);
 }
@@ -132,9 +139,12 @@ async function startAR(btn) {
 function setMap(mapId, btn) {
     currentMap = mapId;
     const gc = document.getElementById('game-container');
-    arHolder.style.display = (mapId === 'ar') ? 'block' : 'none';
+    const scene = document.querySelector('a-scene');
+    
+    if (scene) scene.style.display = (mapId === 'ar') ? 'block' : 'none';
+    
     gc.style.backgroundImage = 'none';
-    gc.style.background = '#1a1a1a';
+    gc.style.background = (mapId === 'ar') ? 'transparent' : '#1a1a1a';
     uiLayer.style.background = (mapId === 'ar') ? 'transparent' : 'linear-gradient(180deg, #000 0%, #1a2a6c 100%)';
 
     if (mapId === 'midnight') {
@@ -143,9 +153,11 @@ function setMap(mapId, btn) {
     } else if (mapId === 'coal') {
         gc.style.backgroundImage = 'url("https://t3.ftcdn.net/jpg/08/97/50/50/360_F_897505055_RC6AC1VHZNyLBQMuMDSrdHZR9tW0zabi.jpg")';
         gc.style.backgroundSize = 'cover';
-    } else if (mapId === 'ar') {
-        gc.style.background = 'transparent';
+        stars = [];
+    } else {
+        stars = [];
     }
+
     if (btn) {
         document.querySelectorAll('.map-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
@@ -171,7 +183,6 @@ function pauseGame() {
     uiLayer.classList.remove('hidden');
     document.getElementById('main-menu').classList.add('hidden');
     document.getElementById('pause-menu').classList.remove('hidden');
-    document.getElementById('settings-menu').classList.add('hidden');
 }
 
 function resumeGame() {
@@ -282,7 +293,8 @@ function animate() {
 }
 
 function showSettings(from) {
-    document.getElementById(from).classList.add('hidden');
+    document.getElementById('main-menu').classList.add('hidden');
+    document.getElementById('pause-menu').classList.add('hidden');
     document.getElementById('settings-menu').classList.remove('hidden');
     document.getElementById('back-from-settings').onclick = () => {
         document.getElementById('settings-menu').classList.add('hidden');
