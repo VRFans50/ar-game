@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Gravity Sort - True AR</title>
+    <title>Gravity Sort - AR GitHub Version</title>
     <script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
     <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
     <style>
@@ -13,12 +13,12 @@
             background: #000; overflow: hidden; touch-action: none;
         }
 
-        /* Интерфейс меню */
-        .overlay {
+        /* UI слои */
+        #ui-layer {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             background: linear-gradient(180deg, #000000 0%, #1a2a6c 100%);
             display: flex; justify-content: center; align-items: center;
-            z-index: 100;
+            z-index: 100; transition: background 0.5s;
         }
 
         .menu-container {
@@ -60,39 +60,39 @@
             border: 1px solid rgba(255,255,255,0.2); color: white; border-radius: 5px; cursor: pointer;
         }
         .map-btn.active { border-color: #4facfe; background: rgba(79, 172, 254, 0.2); }
-        .btn-ar { background: #ff4f8b !important; border: 1px solid #fff; }
+        .btn-ar { background: #ff4f8b !important; color: white; }
 
         .hidden { display: none !important; }
 
-        /* Контейнер для AR видео, изначально пустой */
+        /* Контейнер для видео камеры */
         #ar-holder {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             z-index: 1; display: none;
         }
         
-        /* Убираем лишние элементы AR.js */
-        .arjs-loader { display: none !important; }
+        /* Скрываем мусор от библиотек */
+        .arjs-loader, .a-enter-vr, .a-enter-ar { display: none !important; }
     </style>
 </head>
 <body>
 
     <div id="ar-holder"></div>
 
-    <div id="ui-layer" class="overlay">
+    <div id="ui-layer">
         <div id="main-menu" class="menu-container">
-            <h2 style="font-weight:300; color:#aaa; font-size:14px;">ЛУЧШИЙ РЕКОРД</h2>
-            <div class="high-score" id="best-score" style="font-size: 2.5em; color: #4facfe; margin-bottom: 20px;">0</div>
+            <h2 style="font-weight:300; color:#aaa; font-size:14px;">РЕКОРД</h2>
+            <div id="best-score" style="font-size: 2.5em; color: #4facfe; margin-bottom: 20px;">0</div>
             <button class="btn btn-play" onclick="startGame()">Играть</button>
             <button class="btn btn-settings" onclick="showSettings('main-menu')">Настройки</button>
         </div>
 
         <div id="settings-menu" class="menu-container hidden">
-            <h2>ВЫБОР КАРТЫ</h2>
+            <h2>КАРТА</h2>
             <div class="map-selector">
-                <button class="map-btn active" onclick="setMap('classic', this)">Классика</button>
+                <button class="map-btn active" onclick="setMap('classic', this)">Обычная</button>
                 <button class="map-btn" onclick="setMap('midnight', this)">Полночь</button>
                 <button class="map-btn" onclick="setMap('coal', this)">Уголь</button>
-                <button class="map-btn btn-ar" onclick="enableAR(this)">AR РЕЖИМ 📷</button>
+                <button class="map-btn btn-ar" onclick="requestAR(this)">AR РЕЖИМ 📷</button>
             </div>
             <button class="btn btn-settings" id="back-from-settings">Назад</button>
         </div>
@@ -100,7 +100,7 @@
         <div id="pause-menu" class="menu-container hidden">
             <h2>ПАУЗА</h2>
             <button class="btn btn-play" onclick="resumeGame()">Продолжить</button>
-            <button class="btn btn-settings" onclick="toMainMenu()">В меню</button>
+            <button class="btn btn-settings" onclick="location.reload()">В меню</button>
         </div>
     </div>
 
@@ -118,31 +118,40 @@ const arHolder = document.getElementById('ar-holder');
 const gameContainer = document.getElementById('game-container');
 
 let width, height, score = 0, highScore = 0;
-let shapes = [], particles = [], stars = [];
+let shapes = [], stars = [];
 let gravity = { x: 0, y: 0.5 };
 let gameActive = false, isPaused = false;
 let spawnInterval, currentMap = 'classic';
-let arInitialized = false;
 
 const COLORS = ['#FF5733', '#33FF57', '#3357FF', '#F3FF33'];
 
-// Функция для активации AR (запрос камеры)
-function enableAR(btn) {
-    if (!arInitialized) {
-        // Создаем сцену динамически, чтобы браузер понял: это действие пользователя
+// Главная функция для GitHub: запрос камеры и запуск AR
+async function requestAR(btn) {
+    try {
+        // 1. Прямой запрос к браузеру на использование камеры
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+        // Останавливаем временный поток, AR.js создаст свой
+        stream.getTracks().forEach(track => track.stop());
+
+        // 2. Инициализация AR сцены
         arHolder.innerHTML = `
             <a-scene embedded arjs="sourceType: webcam; debugUIEnabled: false;" vr-mode-ui="enabled: false">
-                <a-entity camera look-controls="enabled: false"></a-entity>
+                <a-entity camera></a-entity>
             </a-scene>
         `;
-        arInitialized = true;
+        arHolder.style.display = 'block';
+        
+        // 3. Переключаем карту
+        setMap('ar', btn);
+    } catch (err) {
+        alert("Пожалуйста, разрешите доступ к камере в настройках браузера для AR.");
+        console.error("Camera error:", err);
     }
-    setMap('ar', btn);
 }
 
 function initStars() {
     stars = [];
-    for(let i = 0; i < 100; i++) {
+    for(let i = 0; i < 80; i++) {
         stars.push({
             x: Math.random() * window.innerWidth,
             y: Math.random() * window.innerHeight,
@@ -155,11 +164,18 @@ function initStars() {
 
 function setMap(mapId, btn) {
     currentMap = mapId;
-    arHolder.style.display = (mapId === 'ar') ? 'block' : 'none';
+    
+    // Выключаем AR если выбран другой режим
+    if (mapId !== 'ar') {
+        arHolder.style.display = 'none';
+        arHolder.innerHTML = '';
+    }
+
     uiLayer.style.background = (mapId === 'ar') ? 'transparent' : 'linear-gradient(180deg, #000000 0%, #1a2a6c 100%)';
     gameContainer.style.background = (mapId === 'ar') ? 'transparent' : (mapId === 'midnight' ? '#000428' : '#1a1a1a');
 
     if (mapId === 'midnight') initStars();
+    else stars = []; // Звезд в AR больше нет
     
     document.querySelectorAll('.map-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
@@ -193,10 +209,6 @@ function resumeGame() {
     startSpawner();
 }
 
-function toMainMenu() {
-    location.reload(); // Простой способ сбросить всё, включая AR
-}
-
 function showSettings(from) {
     document.getElementById(from).classList.add('hidden');
     document.getElementById('settings-menu').classList.remove('hidden');
@@ -214,7 +226,7 @@ function startSpawner() {
 class Shape {
     constructor(x, y, color) {
         this.x = x; this.y = y; this.color = color;
-        this.vx = 0; this.vy = 0; this.radius = 20;
+        this.vx = 0; this.vy = 0;
     }
     update() {
         if (isPaused) return;
