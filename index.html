@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Gravity Sort - AR GitHub Version</title>
+    <title>Gravity Sort - Full Pro</title>
     <script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
     <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
     <style>
@@ -13,12 +13,11 @@
             background: #000; overflow: hidden; touch-action: none;
         }
 
-        /* UI слои */
         #ui-layer {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             background: linear-gradient(180deg, #000000 0%, #1a2a6c 100%);
             display: flex; justify-content: center; align-items: center;
-            z-index: 100; transition: background 0.5s;
+            z-index: 100;
         }
 
         .menu-container {
@@ -34,14 +33,8 @@
         }
         .btn-play { background: #4facfe; color: white; }
         .btn-settings { background: rgba(255, 255, 255, 0.1); color: white; }
+        .btn-ar { background: #ff4f8b !important; color: white; }
 
-        #game-container {
-            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-            z-index: 10; overflow: hidden;
-        }
-        
-        canvas { display: block; position: absolute; top: 0; left: 0; z-index: 20; }
-        
         #game-ui {
             position: absolute; top: 20px; left: 20px; color: white;
             font-size: 24px; pointer-events: none; z-index: 50; display: none;
@@ -60,18 +53,11 @@
             border: 1px solid rgba(255,255,255,0.2); color: white; border-radius: 5px; cursor: pointer;
         }
         .map-btn.active { border-color: #4facfe; background: rgba(79, 172, 254, 0.2); }
-        .btn-ar { background: #ff4f8b !important; color: white; }
 
+        #game-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; }
+        canvas { display: block; position: absolute; top: 0; left: 0; z-index: 20; }
+        #ar-holder { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; display: none; }
         .hidden { display: none !important; }
-
-        /* Контейнер для видео камеры */
-        #ar-holder {
-            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            z-index: 1; display: none;
-        }
-        
-        /* Скрываем мусор от библиотек */
-        .arjs-loader, .a-enter-vr, .a-enter-ar { display: none !important; }
     </style>
 </head>
 <body>
@@ -80,19 +66,19 @@
 
     <div id="ui-layer">
         <div id="main-menu" class="menu-container">
-            <h2 style="font-weight:300; color:#aaa; font-size:14px;">РЕКОРД</h2>
+            <h2 style="font-weight:300; color:#aaa; font-size:14px;">ЛУЧШИЙ РЕКОРД</h2>
             <div id="best-score" style="font-size: 2.5em; color: #4facfe; margin-bottom: 20px;">0</div>
             <button class="btn btn-play" onclick="startGame()">Играть</button>
             <button class="btn btn-settings" onclick="showSettings('main-menu')">Настройки</button>
         </div>
 
         <div id="settings-menu" class="menu-container hidden">
-            <h2>КАРТА</h2>
+            <h2>ВЫБОР КАРТЫ</h2>
             <div class="map-selector">
-                <button class="map-btn active" onclick="setMap('classic', this)">Обычная</button>
+                <button class="map-btn active" onclick="setMap('classic', this)">Классика</button>
                 <button class="map-btn" onclick="setMap('midnight', this)">Полночь</button>
                 <button class="map-btn" onclick="setMap('coal', this)">Уголь</button>
-                <button class="map-btn btn-ar" onclick="requestAR(this)">AR РЕЖИМ 📷</button>
+                <button class="map-btn btn-ar" onclick="startAR(this)">AR РЕЖИМ 📷</button>
             </div>
             <button class="btn btn-settings" id="back-from-settings">Назад</button>
         </div>
@@ -100,6 +86,7 @@
         <div id="pause-menu" class="menu-container hidden">
             <h2>ПАУЗА</h2>
             <button class="btn btn-play" onclick="resumeGame()">Продолжить</button>
+            <button class="btn btn-settings" onclick="showSettings('pause-menu')">Настройки</button>
             <button class="btn btn-settings" onclick="location.reload()">В меню</button>
         </div>
     </div>
@@ -115,71 +102,17 @@ const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 const uiLayer = document.getElementById('ui-layer');
 const arHolder = document.getElementById('ar-holder');
-const gameContainer = document.getElementById('game-container');
+const scoreElement = document.getElementById('current-score');
+const bestScoreElement = document.getElementById('best-score');
 
-let width, height, score = 0, highScore = 0;
-let shapes = [], stars = [];
+let width, height, score = 0, highScore = localStorage.getItem('gs_best') || 0;
+let shapes = [], particles = [], stars = [];
 let gravity = { x: 0, y: 0.5 };
 let gameActive = false, isPaused = false;
 let spawnInterval, currentMap = 'classic';
+let touchStart = null;
 
-const COLORS = ['#FF5733', '#33FF57', '#3357FF', '#F3FF33'];
-
-// Главная функция для GitHub: запрос камеры и запуск AR
-async function requestAR(btn) {
-    try {
-        // 1. Прямой запрос к браузеру на использование камеры
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-        // Останавливаем временный поток, AR.js создаст свой
-        stream.getTracks().forEach(track => track.stop());
-
-        // 2. Инициализация AR сцены
-        arHolder.innerHTML = `
-            <a-scene embedded arjs="sourceType: webcam; debugUIEnabled: false;" vr-mode-ui="enabled: false">
-                <a-entity camera></a-entity>
-            </a-scene>
-        `;
-        arHolder.style.display = 'block';
-        
-        // 3. Переключаем карту
-        setMap('ar', btn);
-    } catch (err) {
-        alert("Пожалуйста, разрешите доступ к камере в настройках браузера для AR.");
-        console.error("Camera error:", err);
-    }
-}
-
-function initStars() {
-    stars = [];
-    for(let i = 0; i < 80; i++) {
-        stars.push({
-            x: Math.random() * window.innerWidth,
-            y: Math.random() * window.innerHeight,
-            size: Math.random() * 2,
-            opacity: Math.random(),
-            v: (Math.random() * 0.01) + 0.005
-        });
-    }
-}
-
-function setMap(mapId, btn) {
-    currentMap = mapId;
-    
-    // Выключаем AR если выбран другой режим
-    if (mapId !== 'ar') {
-        arHolder.style.display = 'none';
-        arHolder.innerHTML = '';
-    }
-
-    uiLayer.style.background = (mapId === 'ar') ? 'transparent' : 'linear-gradient(180deg, #000000 0%, #1a2a6c 100%)';
-    gameContainer.style.background = (mapId === 'ar') ? 'transparent' : (mapId === 'midnight' ? '#000428' : '#1a1a1a');
-
-    if (mapId === 'midnight') initStars();
-    else stars = []; // Звезд в AR больше нет
-    
-    document.querySelectorAll('.map-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-}
+bestScoreElement.innerText = highScore;
 
 function resize() {
     width = canvas.width = window.innerWidth;
@@ -188,11 +121,48 @@ function resize() {
 window.addEventListener('resize', resize);
 resize();
 
+async function startAR(btn) {
+    arHolder.style.display = 'block';
+    if (!arHolder.innerHTML) {
+        arHolder.innerHTML = `<a-scene embedded arjs="sourceType: webcam; debugUIEnabled: false;" vr-mode-ui="enabled: false"><a-entity camera></a-entity></a-scene>`;
+    }
+    setMap('ar', btn);
+}
+
+function setMap(mapId, btn) {
+    currentMap = mapId;
+    const gc = document.getElementById('game-container');
+    arHolder.style.display = (mapId === 'ar') ? 'block' : 'none';
+    gc.style.backgroundImage = 'none';
+    gc.style.background = '#1a1a1a';
+    uiLayer.style.background = (mapId === 'ar') ? 'transparent' : 'linear-gradient(180deg, #000 0%, #1a2a6c 100%)';
+
+    if (mapId === 'midnight') {
+        gc.style.background = '#000428';
+        initStars();
+    } else if (mapId === 'coal') {
+        gc.style.backgroundImage = 'url("https://t3.ftcdn.net/jpg/08/97/50/50/360_F_897505055_RC6AC1VHZNyLBQMuMDSrdHZR9tW0zabi.jpg")';
+        gc.style.backgroundSize = 'cover';
+    } else if (mapId === 'ar') {
+        gc.style.background = 'transparent';
+    }
+    if (btn) {
+        document.querySelectorAll('.map-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+    }
+}
+
+function initStars() {
+    stars = [];
+    for(let i=0; i<80; i++) stars.push({x: Math.random()*width, y: Math.random()*height, s: Math.random()*2, o: Math.random(), v: (Math.random()*0.01)+0.005});
+}
+
 function startGame() {
     uiLayer.classList.add('hidden');
     document.getElementById('game-ui').style.display = 'block';
     document.getElementById('pause-btn').style.display = 'block';
-    score = 0; shapes = []; gameActive = true;
+    score = 0; scoreElement.innerText = 0;
+    shapes = []; particles = []; gameActive = true; isPaused = false;
     startSpawner();
 }
 
@@ -201,12 +171,114 @@ function pauseGame() {
     uiLayer.classList.remove('hidden');
     document.getElementById('main-menu').classList.add('hidden');
     document.getElementById('pause-menu').classList.remove('hidden');
+    document.getElementById('settings-menu').classList.add('hidden');
 }
 
 function resumeGame() {
     isPaused = false; uiLayer.classList.add('hidden');
     document.getElementById('pause-menu').classList.add('hidden');
     startSpawner();
+}
+
+function startSpawner() {
+    if (spawnInterval) clearInterval(spawnInterval);
+    spawnInterval = setInterval(() => { if(!isPaused) shapes.push(new Shape()); }, 1500);
+}
+
+function drawArrow(fromX, fromY, toX, toY) {
+    const angle = Math.atan2(toY - fromY, toX - fromX);
+    const head = 20;
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+    ctx.lineWidth = 4; ctx.beginPath();
+    ctx.moveTo(fromX, fromY); ctx.lineTo(toX, toY);
+    ctx.lineTo(toX - head * Math.cos(angle - Math.PI/6), toY - head * Math.sin(angle - Math.PI/6));
+    ctx.moveTo(toX, toY);
+    ctx.lineTo(toX - head * Math.cos(angle + Math.PI/6), toY - head * Math.sin(angle + Math.PI/6));
+    ctx.stroke();
+}
+
+class Shape {
+    constructor() {
+        this.x = Math.random()*(width-60)+30;
+        this.y = 50;
+        this.color = ['#FF5733', '#33FF57', '#3357FF', '#F3FF33'][Math.floor(Math.random()*4)];
+        this.vx = 0; this.vy = 0; this.r = 18;
+    }
+    update() {
+        if (isPaused) return;
+        this.vx += gravity.x; this.vy += gravity.y;
+        this.x += this.vx; this.y += this.vy;
+        this.vx *= 0.98; this.vy *= 0.98;
+        if (this.x < this.r || this.x > width - this.r) { this.vx *= -0.6; this.x = this.x < this.r ? this.r : width - this.r; }
+        if (this.y < this.r || this.y > height - this.r) { this.vy *= -0.6; this.y = this.y < this.r ? this.r : height - this.r; }
+    }
+    draw() {
+        ctx.fillStyle = this.color;
+        ctx.beginPath(); ctx.roundRect(this.x-15, this.y-15, 30, 30, 5); ctx.fill();
+    }
+}
+
+window.addEventListener('touchstart', e => touchStart = {x: e.touches[0].clientX, y: e.touches[0].clientY});
+window.addEventListener('touchend', e => {
+    if (!touchStart || isPaused) return;
+    const dx = e.changedTouches[0].clientX - touchStart.x;
+    const dy = e.changedTouches[0].clientY - touchStart.y;
+    if (Math.abs(dx) > 30 || Math.abs(dy) > 30) {
+        if (Math.abs(dx) > Math.abs(dy)) gravity = {x: dx > 0 ? 0.6 : -0.6, y: 0};
+        else gravity = {x: 0, y: dy > 0 ? 0.6 : -0.6};
+    }
+});
+
+function resolveCollision(s1, s2) {
+    let dx = s2.x - s1.x, dy = s2.y - s1.y, dist = Math.hypot(dx, dy);
+    if (dist < 32) {
+        if (s1.color === s2.color) return true;
+        let nx = dx/dist, ny = dy/dist, v1n = s1.vx*nx + s1.vy*ny, v2n = s2.vx*nx + s2.vy*ny;
+        if (v1n - v2n > 0) {
+            let imp = (v1n - v2n);
+            s1.vx -= imp * nx; s1.vy -= imp * ny;
+            s2.vx += imp * nx; s2.vy += imp * ny;
+        }
+    }
+    return false;
+}
+
+function animate() {
+    ctx.clearRect(0, 0, width, height);
+
+    if (currentMap === 'midnight') {
+        ctx.fillStyle = 'white';
+        stars.forEach(s => {
+            s.o += s.v; if (s.o > 1 || s.o < 0.2) s.v *= -1;
+            ctx.globalAlpha = Math.max(0, s.o);
+            ctx.beginPath(); ctx.arc(s.x, s.y, s.s, 0, Math.PI*2); ctx.fill();
+        });
+        ctx.globalAlpha = 1;
+    }
+
+    if (gameActive && !isPaused) {
+        drawArrow(width/2, height/2, width/2 + gravity.x*150, height/2 + gravity.y*150);
+        for (let i = 0; i < shapes.length; i++) {
+            for (let j = i + 1; j < shapes.length; j++) {
+                if (resolveCollision(shapes[i], shapes[j])) {
+                    for(let k=0; k<10; k++) particles.push({x: shapes[i].x, y: shapes[i].y, vx: (Math.random()-0.5)*10, vy: (Math.random()-0.5)*10, a: 1, c: shapes[i].color});
+                    shapes.splice(j, 1); shapes.splice(i, 1);
+                    score += 10; scoreElement.innerText = score;
+                    if (score > highScore) { highScore = score; bestScoreElement.innerText = highScore; localStorage.setItem('gs_best', highScore); }
+                    break;
+                }
+            }
+        }
+        shapes.forEach(s => { s.update(); s.draw(); });
+        particles.forEach((p, i) => {
+            p.x += p.vx; p.y += p.vy; p.a -= 0.02;
+            if (p.a <= 0) particles.splice(i, 1);
+            ctx.globalAlpha = p.a; ctx.fillStyle = p.c;
+            ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI*2); ctx.fill();
+        });
+        ctx.globalAlpha = 1;
+    }
+    requestAnimationFrame(animate);
 }
 
 function showSettings(from) {
@@ -216,60 +288,6 @@ function showSettings(from) {
         document.getElementById('settings-menu').classList.add('hidden');
         document.getElementById(from).classList.remove('hidden');
     };
-}
-
-function startSpawner() {
-    if (spawnInterval) clearInterval(spawnInterval);
-    spawnInterval = setInterval(() => { if(gameActive && !isPaused) spawnShape(); }, 1500);
-}
-
-class Shape {
-    constructor(x, y, color) {
-        this.x = x; this.y = y; this.color = color;
-        this.vx = 0; this.vy = 0;
-    }
-    update() {
-        if (isPaused) return;
-        this.vx += gravity.x; this.vy += gravity.y;
-        this.x += this.vx; this.y += this.vy;
-        if (this.x < 15 || this.x > width - 15) this.vx *= -0.7;
-        if (this.y < 15 || this.y > height - 15) this.vy *= -0.7;
-    }
-    draw() {
-        ctx.fillStyle = this.color;
-        ctx.beginPath(); ctx.roundRect(this.x-15, this.y-15, 30, 30, 5); ctx.fill();
-    }
-}
-
-function spawnShape() {
-    shapes.push(new Shape(Math.random()*(width-40)+20, 50, COLORS[Math.floor(Math.random()*4)]));
-}
-
-window.addEventListener('touchstart', e => {
-    const touch = e.touches[0];
-    const x = touch.clientX, y = touch.clientY;
-    if (x < width/3) gravity = {x: -0.5, y: 0};
-    else if (x > width*2/3) gravity = {x: 0.5, y: 0};
-    else if (y < height/3) gravity = {x: 0, y: -0.5};
-    else gravity = {x: 0, y: 0.5};
-});
-
-function animate() {
-    ctx.clearRect(0, 0, width, height);
-    if (currentMap === 'midnight') {
-        ctx.fillStyle = 'white';
-        stars.forEach(s => {
-            s.opacity += s.v;
-            if (s.opacity >= 1 || s.opacity <= 0.1) s.v *= -1;
-            ctx.globalAlpha = Math.max(0, s.opacity);
-            ctx.beginPath(); ctx.arc(s.x, s.y, s.size, 0, Math.PI*2); ctx.fill();
-        });
-        ctx.globalAlpha = 1;
-    }
-    if (gameActive && !isPaused) {
-        shapes.forEach(s => { s.update(); s.draw(); });
-    }
-    requestAnimationFrame(animate);
 }
 animate();
 </script>
