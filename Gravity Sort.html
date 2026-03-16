@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Gravity Sort - AR & Midnight Pro</title>
+    <script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
+    <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
+    <style>
+        body, html {
+            margin: 0; padding: 0; height: 100%;
+            font-family: 'Segoe UI', sans-serif;
+            background: #000; overflow: hidden; touch-action: none;
+        }
+
+        /* Слои UI */
+        .overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: linear-gradient(180deg, #000000 0%, #1a2a6c 100%);
+            display: flex; justify-content: center; align-items: center;
+            z-index: 100;
+        }
+
+        .menu-container {
+            text-align: center; background: rgba(0, 0, 0, 0.85);
+            padding: 30px; border-radius: 20px; backdrop-filter: blur(15px);
+            width: 320px; color: white; border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .high-score { font-size: 2.5em; color: #4facfe; margin-bottom: 20px; }
+
+        .btn {
+            display: block; width: 100%; padding: 12px; margin: 8px 0;
+            border: none; border-radius: 10px; font-size: 1em;
+            cursor: pointer; transition: 0.2s; text-transform: uppercase; font-weight: bold;
+        }
+        .btn-play { background: #4facfe; color: white; }
+        .btn-settings { background: rgba(255, 255, 255, 0.1); color: white; }
+
+        #game-container {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background-size: cover; background-position: center;
+            transition: background 0.4s ease-in-out;
+            z-index: 10;
+        }
+        
+        canvas { display: block; position: absolute; top: 0; left: 0; z-index: 20; }
+        
+        #map-overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.3); pointer-events: none; display: none; z-index: 11;
+        }
+
+        #game-ui {
+            position: absolute; top: 20px; left: 20px; color: white;
+            font-size: 24px; pointer-events: none; z-index: 50; display: none;
+            text-shadow: 0 2px 4px rgba(0,0,0,1);
+        }
+
+        #pause-btn {
+            position: absolute; top: 20px; right: 20px; width: 45px; height: 45px;
+            background: rgba(0,0,0,0.5); border: 2px solid white; border-radius: 50%;
+            color: white; cursor: pointer; z-index: 51; display: none;
+        }
+
+        .map-selector { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 15px 0; }
+        .map-btn {
+            padding: 8px; font-size: 12px; background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.2); color: white; border-radius: 5px; cursor: pointer;
+        }
+        .map-btn.active { border-color: #4facfe; background: rgba(79, 172, 254, 0.2); }
+        .btn-ar { background: #ff4f8b !important; border: 1px solid #fff; }
+
+        .hidden { display: none !important; }
+
+        #ar-video-bg {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            z-index: 1; display: none;
+        }
+    </style>
+</head>
+<body style="margin: 0; overflow: hidden;">
+
+    <div id="ar-video-bg">
+        <a-scene embedded arjs="sourceType: webcam; debugUIEnabled: false;" vr-mode-ui="enabled: false">
+            <a-marker-camera preset="hiro"></a-marker-camera>
+        </a-scene>
+    </div>
+
+    <div id="ui-layer" class="overlay">
+        <div id="main-menu" class="menu-container">
+            <h2 style="font-weight:300; color:#aaa; font-size:14px;">ЛУЧШИЙ РЕКОРД</h2>
+            <div class="high-score" id="best-score">0</div>
+            <button class="btn btn-play" onclick="startGame()">Играть</button>
+            <button class="btn btn-settings" onclick="showSettings('main-menu')">Настройки</button>
+        </div>
+
+        <div id="pause-menu" class="menu-container hidden">
+            <h2>ПАУЗА</h2>
+            <button class="btn btn-play" onclick="resumeGame()">Продолжить</button>
+            <button class="btn btn-settings" onclick="showSettings('pause-menu')">Настройки</button>
+            <button class="btn btn-settings" onclick="toMainMenu()">В меню</button>
+        </div>
+
+        <div id="settings-menu" class="menu-container hidden">
+            <h2>ВЫБОР КАРТЫ</h2>
+            <div class="map-selector">
+                <button class="map-btn active" onclick="setMap('classic', this)">Классика</button>
+                <button class="map-btn" onclick="setMap('midnight', this)">Полночь</button>
+                <button class="map-btn" onclick="setMap('coal', this)">Уголь</button>
+                <button class="map-btn btn-ar" onclick="setMap('ar', this)">AR РЕЖИМ 📷</button>
+            </div>
+            <button class="btn btn-settings" id="back-from-settings">Назад</button>
+        </div>
+    </div>
+
+    <div id="game-container">
+        <div id="map-overlay"></div>
+        <div id="game-ui">Счет: <span id="current-score">0</span></div>
+        <button id="pause-btn" onclick="pauseGame()">||</button>
+        <canvas id="gameCanvas"></canvas>
+    </div>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const uiLayer = document.getElementById('ui-layer');
+const gameContainer = document.getElementById('game-container');
+const mapOverlay = document.getElementById('map-overlay');
+const scoreElement = document.getElementById('current-score');
+const bestScoreElement = document.getElementById('best-score');
+const arBg = document.getElementById('ar-video-bg');
+
+let width, height, score = 0, highScore = 0;
+let shapes = [], particles = [], stars = [];
+let gravity = { x: 0, y: 0.5 };
+let gameActive = false, isPaused = false;
+let spawnInterval, currentMap = 'classic';
+
+const COLORS = ['#FF5733', '#33FF57', '#3357FF', '#F3FF33'];
+
+const maps = {
+    classic: { bg: '#1a1a1a', overlay: false },
+    midnight: { bg: 'linear-gradient(to bottom, #000428, #004e92)', overlay: false },
+    coal: { bg: 'url("https://t3.ftcdn.net/jpg/08/97/50/50/360_F_897505055_RC6AC1VHZNyLBQMuMDSrdHZR9tW0zabi.jpg")', overlay: true },
+    ar: { bg: 'transparent', overlay: false }
+};
+
+// Инициализация звезд с параметрами мерцания
+function initStars() {
+    stars = [];
+    for(let i = 0; i < 120; i++) {
+        stars.push({
+            x: Math.random() * window.innerWidth,
+            y: Math.random() * window.innerHeight,
+            size: Math.random() * 2.5,
+            opacity: Math.random(),
+            v: (Math.random() * 0.008) + 0.003 // Скорость мерцания
+        });
+    }
+}
+
+function setMap(mapId, btn) {
+    currentMap = mapId;
+    const map = maps[mapId];
+    
+    gameContainer.style.background = 'none';
+    gameContainer.style.backgroundImage = 'none';
+    arBg.style.display = 'none';
+    uiLayer.style.background = 'linear-gradient(180deg, #000000 0%, #1a2a6c 100%)';
+
+    if (mapId === 'ar') {
+        arBg.style.display = 'block';
+        gameContainer.style.background = 'transparent';
+        uiLayer.style.background = 'transparent';
+    } else if (mapId === 'midnight') {
+        initStars();
+        gameContainer.style.background = map.bg;
+    } else if (map.bg.startsWith('url')) {
+        gameContainer.style.backgroundImage = map.bg;
+        gameContainer.style.backgroundSize = 'cover';
+        gameContainer.style.backgroundPosition = 'center';
+    } else {
+        gameContainer.style.background = map.bg;
+    }
+
+    mapOverlay.style.display = map.overlay ? 'block' : 'none';
+    
+    document.querySelectorAll('.map-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+}
+
+function resize() {
+    width = canvas.width = window.innerWidth;
+    height = canvas.height = window.innerHeight;
+    if (currentMap === 'midnight') initStars();
+}
+window.addEventListener('resize', resize);
+resize();
+
+function startGame() {
+    uiLayer.classList.add('hidden');
+    document.getElementById('game-ui').style.display = 'block';
+    document.getElementById('pause-btn').style.display = 'block';
+    score = 0; scoreElement.innerText = score;
+    shapes = []; particles = []; gameActive = true; isPaused = false;
+    startSpawner();
+}
+
+function pauseGame() {
+    isPaused = true; clearInterval(spawnInterval);
+    uiLayer.classList.remove('hidden');
+    document.getElementById('main-menu').classList.add('hidden');
+    document.getElementById('pause-menu').classList.remove('hidden');
+}
+
+function resumeGame() {
+    isPaused = false; uiLayer.classList.add('hidden');
+    document.getElementById('pause-menu').classList.add('hidden');
+    startSpawner();
+}
+
+function toMainMenu() {
+    gameActive = false;
+    document.getElementById('game-ui').style.display = 'none';
+    document.getElementById('pause-btn').style.display = 'none';
+    document.getElementById('pause-menu').classList.add('hidden');
+    document.getElementById('main-menu').classList.remove('hidden');
+}
+
+function showSettings(from) {
+    document.getElementById(from).classList.add('hidden');
+    document.getElementById('settings-menu').classList.remove('hidden');
+    document.getElementById('back-from-settings').onclick = () => {
+        document.getElementById('settings-menu').classList.add('hidden');
+        document.getElementById(from).classList.remove('hidden');
+    };
+}
+
+function startSpawner() {
+    if (spawnInterval) clearInterval(spawnInterval);
+    spawnInterval = setInterval(() => { if(gameActive && !isPaused) spawnShape(); }, 1500);
+}
+
+function drawArrow(fromX, fromY, toX, toY) {
+    const angle = Math.atan2(toY - fromY, toX - fromX);
+    const head = 22;
+    ctx.strokeStyle = (currentMap === 'ar' || currentMap === 'midnight') ? 'rgba(255, 255, 255, 0.8)' : 'rgba(255, 255, 255, 0.4)';
+    ctx.lineWidth = 4; ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(fromX, fromY); ctx.lineTo(toX, toY);
+    ctx.lineTo(toX - head * Math.cos(angle - Math.PI/6), toY - head * Math.sin(angle - Math.PI/6));
+    ctx.moveTo(toX, toY);
+    ctx.lineTo(toX - head * Math.cos(angle + Math.PI/6), toY - head * Math.sin(angle + Math.PI/6));
+    ctx.stroke();
+}
+
+class Particle {
+    constructor(x, y, color) {
+        this.x = x; this.y = y; this.color = color;
+        this.vx = (Math.random()-0.5)*12; this.vy = (Math.random()-0.5)*12;
+        this.alpha = 1;
+    }
+    update() { this.x += this.vx; this.y += this.vy; this.alpha -= 0.03; }
+    draw() {
+        ctx.save();
+        ctx.globalAlpha = this.alpha; ctx.fillStyle = this.color;
+        ctx.beginPath(); ctx.arc(this.x, this.y, 4, 0, Math.PI*2); ctx.fill();
+        ctx.restore();
+    }
+}
+
+class Shape {
+    constructor(x, y, color) {
+        this.x = x; this.y = y; this.color = color;
+        this.vx = 0; this.vy = 0; this.radius = 20;
+    }
+    update() {
+        if (isPaused) return;
+        this.vx += gravity.x; this.vy += gravity.y;
+        this.x += this.vx; this.y += this.vy;
+        this.vx *= 0.98; this.vy *= 0.98;
+        if (this.x < this.radius || this.x > width - this.radius) { this.vx *= -0.5; this.x = this.x < this.radius ? this.radius : width - this.radius; }
+        if (this.y < this.radius || this.y > height - this.radius) { this.vy *= -0.5; this.y = this.y < this.radius ? this.radius : height - this.radius; }
+    }
+    draw() {
+        ctx.save();
+        ctx.fillStyle = this.color;
+        ctx.shadowBlur = 15;
+        ctx.shadowColor = 'black';
+        ctx.beginPath(); ctx.roundRect(this.x-15, this.y-15, 30, 30, 8); ctx.fill();
+        ctx.restore();
+    }
+}
+
+function resolveCollision(s1, s2) {
+    const dx = s2.x - s1.x, dy = s2.y - s1.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist < 36) {
+        if (s1.color === s2.color) return true;
+        const nx = dx/dist, ny = dy/dist;
+        const v1n = s1.vx * nx + s1.vy * ny, v2n = s2.vx * nx + s2.vy * ny;
+        if (v1n - v2n > 0) {
+            const imp = (v1n - v2n);
+            s1.vx -= imp * nx; s1.vy -= imp * ny;
+            s2.vx += imp * nx; s2.vy += imp * ny;
+        }
+    }
+    return false;
+}
+
+function spawnShape() {
+    shapes.push(new Shape(Math.random()*(width-40)+20, Math.random()*(height-40)+20, COLORS[Math.floor(Math.random()*4)]));
+}
+
+let touchS = null;
+window.addEventListener('touchstart', e => touchS = e.touches[0]);
+window.addEventListener('touchend', e => {
+    if(!gameActive || isPaused || !touchS) return;
+    const dx = e.changedTouches[0].clientX - touchS.clientX, dy = e.changedTouches[0].clientY - touchS.clientY;
+    if(Math.abs(dx)>20 || Math.abs(dy)>20) {
+        if(Math.abs(dx)>Math.abs(dy)) gravity = {x: dx>0?0.6:-0.6, y:0};
+        else gravity = {x:0, y: dy>0?0.6:-0.6};
+    }
+});
+
+function animate() {
+    ctx.clearRect(0, 0, width, height);
+
+    // Плавная анимация мерцающих звезд для карты Полночь
+    if (currentMap === 'midnight' && !isPaused) {
+        ctx.fillStyle = 'white';
+        stars.forEach(star => {
+            star.opacity += star.v;
+            if (star.opacity >= 1 || star.opacity <= 0.1) star.v *= -1;
+            
+            ctx.save();
+            ctx.globalAlpha = Math.max(0, star.opacity);
+            ctx.beginPath();
+            ctx.arc(star.x, star.y, star.size, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        });
+    }
+
+    if (!isPaused && gameActive) {
+        drawArrow(width/2, height/2, width/2 + gravity.x*120, height/2 + gravity.y*120);
+        for (let i = 0; i < shapes.length; i++) {
+            for (let j = i + 1; j < shapes.length; j++) {
+                if (resolveCollision(shapes[i], shapes[j])) {
+                    for(let k=0; k<12; k++) particles.push(new Particle(shapes[i].x, shapes[i].y, shapes[i].color));
+                    shapes.splice(j, 1); shapes.splice(i, 1);
+                    score += 10; scoreElement.innerText = score;
+                    if(score > highScore) { highScore = score; bestScoreElement.innerText = highScore; }
+                    break;
+                }
+            }
+        }
+        particles = particles.filter(p => p.alpha > 0);
+        particles.forEach(p => { p.update(); p.draw(); });
+        shapes.forEach(s => { s.update(); s.draw(); });
+    }
+    requestAnimationFrame(animate);
+}
+animate();
+</script>
+</body>
+</html>
